@@ -27,15 +27,17 @@
 ### 快速安装（推荐）
 
 ```bash
-pip install cos-vectors-embed
+pip install cos-vectors-embed-cli
 ```
+
+安装完成后，在终端中使用 `cos-vectors-embed` 命令。
 
 ### 开发安装
 
 ```bash
 # 克隆仓库
-git clone <repo-url>
-cd cos-vectors-embed
+git clone https://github.com/TencentCloud/cos-vectors-embed-cli.git
+cd cos-vectors-embed-cli
 
 # 以开发模式安装
 pip install -e .

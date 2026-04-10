@@ -29,15 +29,17 @@ You can perform similarity queries for vector embeddings in your COS vector inde
 ### Quick Install (Recommended)
 
 ```bash
-pip install cos-vectors-embed
+pip install cos-vectors-embed-cli
 ```
+
+After installation, use the `cos-vectors-embed` command in your terminal.
 
 ### Development Install
 
 ```bash
 # Clone the repository
-git clone <repo-url>
-cd cos-vectors-embed
+git clone https://github.com/TencentCloud/cos-vectors-embed-cli.git
+cd cos-vectors-embed-cli
 
 # Install in development mode
 pip install -e .

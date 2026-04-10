@@ -1,4 +1,8 @@
-"""cos-vectors-embed-cli: CLI tool for vectorizing content and storing in Tencent COS Vector Buckets."""
+"""cos-vectors-embed-cli: CLI tool for vectorizing content and storing in Tencent COS Vector Buckets.
+
+Package name: cos-vectors-embed-cli (pip install cos-vectors-embed-cli)
+Command name: cos-vectors-embed
+"""
 
 import os
 from setuptools import setup, find_packages
