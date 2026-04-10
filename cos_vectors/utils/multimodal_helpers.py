@@ -1,10 +1,9 @@
-"""Multimodal helpers for cos-vectors-embed-cli."""
+"""Multimodal helpers for cos-vectors-embed."""
 
 import base64
 import mimetypes
 import os
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urlparse
 
 
 def parse_cos_uri(uri: str) -> Tuple[str, str]:

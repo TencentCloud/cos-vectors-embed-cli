@@ -1,11 +1,13 @@
-"""Unified processing pipeline for cos-vectors-embed-cli.
+"""Unified processing pipeline for cos-vectors-embed.
 
 Orchestrates the full flow: content preparation → embedding → vector assembly.
 """
 
+import base64
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from qcloud_cos import CosS3Client
 from rich.console import Console
 
 from cos_vectors.core.cos_vector_service import COSVectorService
@@ -15,6 +17,7 @@ from cos_vectors.utils.multimodal_helpers import (
     create_source_metadata,
     is_cos_uri,
     is_http_url,
+    parse_cos_uri,
     read_file_content,
     read_file_content_from_url,
     read_image_as_base64,
@@ -51,6 +54,7 @@ class UnifiedProcessor:
         model_id: str,
         console: Optional[Console] = None,
         debug: bool = False,
+        cos_s3_client: Optional[CosS3Client] = None,
     ):
         """Initialize the unified processor.
 
@@ -60,12 +64,14 @@ class UnifiedProcessor:
             model_id: Embedding model identifier.
             console: Rich Console for output.
             debug: Enable debug logging.
+            cos_s3_client: Optional COS S3 client for reading COS objects.
         """
         self.embedding_provider = embedding_provider
         self.cos_service = cos_service
         self.model_id = model_id
         self.console = console or Console()
         self.debug = debug
+        self.cos_s3_client = cos_s3_client
 
     def process(
         self,
@@ -100,7 +106,7 @@ class UnifiedProcessor:
                     self.console.print(
                         f"[dim]Auto-detected index dimension: {dimensions}[/dim]"
                     )
-            except Exception as e:
+            except (OSError, ValueError, ConnectionError, RuntimeError) as e:
                 if self.debug:
                     self.console.print(
                         f"[dim]Could not auto-detect dimensions: {e}[/dim]"
@@ -218,12 +224,14 @@ class UnifiedProcessor:
         if is_http_url(source):
             return read_file_content_from_url(source)
         elif is_cos_uri(source):
-            # For COS URIs, would need COS client to download
-            # For now, raise an informative error
-            raise NotImplementedError(
-                f"Reading from COS URI '{source}' in text mode is not yet supported. "
-                "Use local files or HTTP URLs."
-            )
+            if self.cos_s3_client is None:
+                raise ValueError(
+                    f"Cannot read COS URI '{source}': COS S3 client not configured. "
+                    "Ensure COS_SECRET_ID, COS_SECRET_KEY, and COS_REGION are set."
+                )
+            bucket, key = parse_cos_uri(source)
+            response = self.cos_s3_client.get_object(Bucket=bucket, Key=key)
+            return response["Body"].get_raw_stream().read().decode("utf-8")
         else:
             return read_file_content(source)
 
@@ -231,15 +239,25 @@ class UnifiedProcessor:
         """Read image content and return base64-encoded string.
 
         Args:
-            source: Local image file path.
+            source: Local image file path or COS URI.
 
         Returns:
             Base64-encoded image string.
         """
-        if is_cos_uri(source) or is_http_url(source):
+        if is_cos_uri(source):
+            if self.cos_s3_client is None:
+                raise ValueError(
+                    f"Cannot read COS URI '{source}': COS S3 client not configured. "
+                    "Ensure COS_SECRET_ID, COS_SECRET_KEY, and COS_REGION are set."
+                )
+            bucket, key = parse_cos_uri(source)
+            response = self.cos_s3_client.get_object(Bucket=bucket, Key=key)
+            image_bytes = response["Body"].get_raw_stream().read()
+            return base64.b64encode(image_bytes).decode("utf-8")
+        elif is_http_url(source):
             raise NotImplementedError(
-                f"Reading images from '{source}' is not yet supported. "
-                "Use local image files."
+                f"Reading images from HTTP URL '{source}' is not yet supported. "
+                "Use local image files or COS URIs."
             )
         return read_image_as_base64(source)
 

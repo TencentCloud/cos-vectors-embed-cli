@@ -35,7 +35,7 @@ from cos_vectors.commands.embed_query import embed_query
     default=False,
     help="Enable debug output with detailed logging.",
 )
-@click.version_option(version=__version__, prog_name="cos-vectors-embed-cli")
+@click.version_option(version=__version__, prog_name="cos-vectors-embed")
 @click.pass_context
 def cli(ctx, region, domain, debug):
     """COS Vectors Embed CLI - Vectorize content and store in COS Vector Buckets."""
@@ -62,7 +62,9 @@ def main():
         console = Console()
         console.print("\n[yellow]Operation cancelled by user.[/yellow]")
         sys.exit(130)
-    except Exception as e:
+    except (click.ClickException, click.Abort):
+        raise
+    except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console = Console()
         console.print(f"\n[red]Error: {e}[/red]")
         sys.exit(1)

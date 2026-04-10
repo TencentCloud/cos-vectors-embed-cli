@@ -1,4 +1,4 @@
-"""Embedding Provider abstraction for cos-vectors-embed-cli.
+"""Embedding Provider abstraction for cos-vectors-embed.
 
 Defines the EmbeddingProvider ABC and concrete implementations.
 Uses the Provider pattern to support pluggable embedding services.
@@ -151,7 +151,7 @@ class OpenAICompatibleProvider(EmbeddingProvider):
             err_body = ""
             try:
                 err_body = exc.read().decode("utf-8", errors="replace")
-            except Exception:
+            except (OSError, ValueError):
                 pass
             raise EmbeddingAPIError(exc.code, err_body or str(exc)) from exc
         except urllib.error.URLError as exc:

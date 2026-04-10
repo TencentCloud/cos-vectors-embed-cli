@@ -1,4 +1,4 @@
-"""COS Vector Storage service for cos-vectors-embed-cli.
+"""COS Vector Storage service for cos-vectors-embed.
 
 Wraps CosVectorsClient from cos-python-sdk-v5 for vector operations.
 Uses Domain parameter (not Endpoint) for proper vector API routing.
@@ -127,7 +127,7 @@ class COSVectorService:
         index_name: str,
         query_embedding: List[float],
         top_k: int = 5,
-        filter_expr: Optional[str] = None,
+        filter_expr: Optional[Dict[str, Any]] = None,
         return_metadata: bool = True,
         return_distance: bool = True,
     ) -> List[Dict[str, Any]]:
@@ -138,7 +138,7 @@ class COSVectorService:
             index_name: Index name.
             query_embedding: Query vector (list of floats).
             top_k: Number of results to return.
-            filter_expr: Optional metadata filter expression.
+            filter_expr: Optional metadata filter dict (JSON object).
             return_metadata: Whether to return metadata.
             return_distance: Whether to return distance scores.
 

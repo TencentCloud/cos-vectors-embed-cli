@@ -1,9 +1,10 @@
-"""Streaming batch orchestrator for cos-vectors-embed-cli.
+"""Streaming batch orchestrator for cos-vectors-embed.
 
 Handles large-scale file processing with streaming generators
 and parallel execution via ThreadPoolExecutor.
 """
 
+import base64
 import glob
 import os
 import time
@@ -11,20 +12,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
+from qcloud_cos import CosS3Client
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from cos_vectors.core.cos_vector_service import COSVectorService
 from cos_vectors.core.embedding_provider import EmbeddingProvider
-from cos_vectors.core.unified_processor import ProcessingResult, UnifiedProcessor
 from cos_vectors.utils.models import (
-    ProcessingInput,
+    IMAGE_EXTENSIONS,
+    TEXT_EXTENSIONS,
     detect_content_type_from_extension,
     generate_vector_key,
 )
 from cos_vectors.utils.multimodal_helpers import (
     create_source_metadata,
     is_cos_uri,
+    parse_cos_uri,
     read_file_content,
     read_image_as_base64,
 )
@@ -66,6 +69,7 @@ class StreamingBatchOrchestrator:
         batch_size: int = 100,
         console: Optional[Console] = None,
         debug: bool = False,
+        cos_s3_client: Optional[CosS3Client] = None,
     ):
         """Initialize the streaming batch orchestrator.
 
@@ -77,6 +81,7 @@ class StreamingBatchOrchestrator:
             batch_size: Number of items per storage batch.
             console: Rich Console for output.
             debug: Enable debug logging.
+            cos_s3_client: Optional COS S3 client for reading COS objects.
         """
         self.embedding_provider = embedding_provider
         self.cos_service = cos_service
@@ -85,6 +90,7 @@ class StreamingBatchOrchestrator:
         self.batch_size = batch_size
         self.console = console or Console()
         self.debug = debug
+        self.cos_s3_client = cos_s3_client
 
     def process_streaming_batch(
         self,
@@ -219,13 +225,116 @@ class StreamingBatchOrchestrator:
     ) -> None:
         """Process COS objects matching a prefix.
 
-        Note: COS streaming requires COS client for object listing.
-        This is a placeholder for future implementation.
+        Parses the cos://bucket/prefix URI, lists objects via pagination,
+        streams them in chunks, and processes each chunk in parallel.
         """
+        if self.cos_s3_client is None:
+            raise ValueError(
+                f"Cannot process COS URI '{cos_uri}': COS S3 client not configured. "
+                "Ensure COS_SECRET_ID, COS_SECRET_KEY, and COS_REGION are set."
+            )
+
+        # Parse COS URI to get source bucket and prefix
+        _, raw_path = parse_cos_uri(cos_uri)
+
+        # Handle wildcard and trailing slash: "prefix/*" -> "prefix/", "prefix/" -> "prefix/"
+        prefix = raw_path
+        if prefix.endswith("*"):
+            prefix = prefix[:-1]
+        if not prefix.endswith("/"):
+            prefix += "/"
+
+        # Extract the source bucket from the URI (cos://source-bucket/prefix)
+        source_bucket = cos_uri[6:].split("/", 1)[0]
+
+        chunks = list(self._stream_cos_chunks(source_bucket, prefix))
+
+        if not chunks:
+            self.console.print(
+                f"[yellow]Warning: No supported files found under '{cos_uri}'[/yellow]"
+            )
+            return
+
+        total_files = sum(len(chunk) for chunk in chunks)
         self.console.print(
-            "[yellow]COS prefix streaming is not yet fully implemented. "
-            "Please use local file patterns for now.[/yellow]"
+            f"Found {total_files} supported file(s) under '{cos_uri}'"
         )
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task("Processing COS objects...", total=total_files)
+
+            for chunk in chunks:
+                self._process_chunk(
+                    file_paths=chunk,
+                    bucket_name=bucket_name,
+                    index_name=index_name,
+                    metadata=metadata,
+                    filename_as_key=filename_as_key,
+                    key_prefix=key_prefix,
+                    dimensions=dimensions,
+                    result=result,
+                    progress=progress,
+                    task_id=task,
+                )
+
+    def _stream_cos_chunks(
+        self, bucket: str, prefix: str
+    ) -> Generator[List[str], None, None]:
+        """Stream COS object keys in chunks using list_objects pagination.
+
+        Uses Marker-based manual pagination. Filters objects by supported
+        extensions (TEXT_EXTENSIONS + IMAGE_EXTENSIONS) and skips directory
+        markers (keys ending with '/').
+
+        Args:
+            bucket: COS source bucket name.
+            prefix: Object key prefix for listing.
+
+        Yields:
+            Lists of COS URIs (cos://bucket/key), each up to batch_size.
+        """
+        allowed_extensions = TEXT_EXTENSIONS | IMAGE_EXTENSIONS
+        marker = ""
+        chunk: List[str] = []
+
+        while True:
+            response = self.cos_s3_client.list_objects(
+                Bucket=bucket, Prefix=prefix, Marker=marker
+            )
+            contents = response.get("Contents", [])
+            if not contents:
+                break
+
+            for obj in contents:
+                obj_key = obj["Key"]
+
+                # Skip directory markers
+                if obj_key.endswith("/"):
+                    continue
+
+                # Filter by supported extensions
+                ext = os.path.splitext(obj_key)[1].lower()
+                if ext not in allowed_extensions:
+                    continue
+
+                cos_uri = f"cos://{bucket}/{obj_key}"
+                chunk.append(cos_uri)
+                if len(chunk) >= self.batch_size:
+                    yield chunk
+                    chunk = []
+
+            if response.get("IsTruncated") == "false":
+                break
+            marker = response.get("NextMarker", "")
+
+        if chunk:
+            yield chunk
 
     def _process_chunk(
         self,
@@ -276,7 +385,7 @@ class StreamingBatchOrchestrator:
                     vector = future.result()
                     if vector:
                         vectors.append(vector)
-                except Exception as e:
+                except (OSError, ValueError, ConnectionError, RuntimeError) as e:
                     result.failed_count += 1
                     result.errors.append((filepath, str(e)))
                     if self.debug:
@@ -297,7 +406,7 @@ class StreamingBatchOrchestrator:
                 )
                 result.processed_count += len(keys)
                 result.processed_keys.extend(keys)
-            except Exception as e:
+            except (OSError, ValueError, ConnectionError, RuntimeError) as e:
                 result.failed_count += len(vectors)
                 for v in vectors:
                     result.errors.append((v.get("key", "unknown"), str(e)))
@@ -312,8 +421,10 @@ class StreamingBatchOrchestrator:
     ) -> Optional[Dict[str, Any]]:
         """Process a single file: read → embed → assemble vector.
 
+        Supports both local file paths and COS URIs (cos://bucket/key).
+
         Args:
-            filepath: Local file path.
+            filepath: Local file path or COS URI.
             metadata: User metadata.
             filename_as_key: Use filename as key.
             key_prefix: Key prefix.
@@ -324,11 +435,26 @@ class StreamingBatchOrchestrator:
         """
         content_type = detect_content_type_from_extension(filepath)
 
-        # Read content
-        if content_type == "image":
-            content_data = read_image_as_base64(filepath)
+        # Read content based on source type
+        if is_cos_uri(filepath):
+            if self.cos_s3_client is None:
+                raise ValueError(
+                    f"Cannot read COS URI '{filepath}': COS S3 client not configured."
+                )
+            bucket, key = parse_cos_uri(filepath)
+            response = self.cos_s3_client.get_object(Bucket=bucket, Key=key)
+            raw_bytes = response["Body"].get_raw_stream().read()
+
+            if content_type == "image":
+                content_data = base64.b64encode(raw_bytes).decode("utf-8")
+            else:
+                content_data = raw_bytes.decode("utf-8")
         else:
-            content_data = read_file_content(filepath)
+            # Local file
+            if content_type == "image":
+                content_data = read_image_as_base64(filepath)
+            else:
+                content_data = read_file_content(filepath)
 
         if not content_data:
             return None

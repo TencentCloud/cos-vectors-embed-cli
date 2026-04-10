@@ -1,9 +1,9 @@
-"""Data models and utility functions for cos-vectors-embed-cli."""
+"""Data models and utility functions for cos-vectors-embed."""
 
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass

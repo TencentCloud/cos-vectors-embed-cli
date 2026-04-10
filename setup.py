@@ -27,9 +27,15 @@ setup(
         "click>=8.0.0",
         "rich>=12.0.0",
     ],
+    extras_require={
+        "test": [
+            "pytest>=7.0",
+            "pytest-cov>=4.0",
+        ],
+    },
     entry_points={
         "console_scripts": [
-            "cos-vectors-embed-cli=cos_vectors.cli:main",
+            "cos-vectors-embed=cos_vectors.cli:main",
         ],
     },
     classifiers=[

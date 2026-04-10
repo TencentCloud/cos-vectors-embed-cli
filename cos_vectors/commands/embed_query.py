@@ -1,20 +1,18 @@
-"""Query subcommand for cos-vectors-embed-cli.
+"""Query subcommand for cos-vectors-embed.
 
 Vectorizes query input and performs similarity search on COS Vector index.
 """
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 
 import click
 from rich.console import Console
 from rich.json import JSON as RichJSON
 from rich.table import Table
 
-from cos_vectors.core.cos_vector_service import COSVectorService
-from cos_vectors.core.embedding_provider import get_provider
 from cos_vectors.core.unified_processor import UnifiedProcessor
-from cos_vectors.utils.config import get_domain, get_region
+from cos_vectors.utils.config import get_domain, get_region, init_services
 from cos_vectors.utils.models import prepare_processing_input
 
 
@@ -42,12 +40,7 @@ from cos_vectors.utils.models import prepare_processing_input
 @click.option(
     "--text",
     default=None,
-    help="Local text file containing the query.",
-)
-@click.option(
-    "--image",
-    default=None,
-    help="Local image file to query with.",
+    help="Text file path or COS URI (cos://bucket/key) containing the query.",
 )
 @click.option(
     "--top-k",
@@ -59,7 +52,7 @@ from cos_vectors.utils.models import prepare_processing_input
     "--filter",
     "filter_expr",
     default=None,
-    help="Metadata filter expression.",
+    help='Metadata filter as JSON string, e.g. \'{"category": {"$eq": "finance"}}\'.',
 )
 @click.option(
     "--return-distance/--no-return-distance",
@@ -112,7 +105,6 @@ def embed_query(
     model_id,
     text_value,
     text,
-    image,
     top_k,
     filter_expr,
     return_distance,
@@ -128,45 +120,47 @@ def embed_query(
     console: Console = ctx.obj["console"]
     debug: bool = ctx.obj["debug"]
 
-    # Resolve region and domain
+    # Resolve region first, then domain (domain can auto-assemble from region)
     region = get_region(region or ctx.obj.get("region"))
-    domain = get_domain(domain or ctx.obj.get("domain"))
+    domain = get_domain(domain or ctx.obj.get("domain"), region=region)
+
+    # Parse filter JSON
+    parsed_filter = None
+    if filter_expr is not None:
+        try:
+            parsed_filter = json.loads(filter_expr)
+            if not isinstance(parsed_filter, dict):
+                raise click.UsageError(
+                    "Invalid --filter: must be a JSON object (dict), not "
+                    f"{type(parsed_filter).__name__}. "
+                    'Example: --filter \'{"category": {"$eq": "finance"}}\''
+                )
+        except json.JSONDecodeError as e:
+            raise click.UsageError(
+                f"Invalid --filter JSON: {e}\n"
+                "Filter must be a valid JSON object. "
+                'Example: --filter \'{"category": {"$eq": "finance"}}\''
+            )
 
     # Validate inputs
-    if not any([text_value, text, image]):
+    if not any([text_value, text]):
         raise click.UsageError(
             "At least one query input is required: "
-            "--text-value, --text, or --image"
-        )
-
-    # Validate embedding API config
-    if not embedding_api_base:
-        raise click.UsageError(
-            "Embedding API base URL is required. "
-            "Use --embedding-api-base or set EMBEDDING_API_BASE env var."
-        )
-    if not embedding_api_key:
-        raise click.UsageError(
-            "Embedding API key is required. "
-            "Use --embedding-api-key or set EMBEDDING_API_KEY env var."
+            "--text-value or --text"
         )
 
     try:
         # Initialize services
-        embedding_provider = get_provider(
-            provider_type=provider,
-            api_base=embedding_api_base,
-            api_key=embedding_api_key,
-            default_model=model_id,
-            console=console,
-            debug=debug,
-        )
-
-        cos_service = COSVectorService(
+        embedding_provider, cos_service, cos_s3_client = init_services(
+            provider=provider,
+            embedding_api_base=embedding_api_base,
+            embedding_api_key=embedding_api_key,
+            model_id=model_id,
             region=region,
             domain=domain,
-            debug=debug,
+            text=text,
             console=console,
+            debug=debug,
         )
 
         processor = UnifiedProcessor(
@@ -175,13 +169,13 @@ def embed_query(
             model_id=model_id,
             console=console,
             debug=debug,
+            cos_s3_client=cos_s3_client,
         )
 
         # Prepare query input
         processing_input = prepare_processing_input(
             text_value=text_value,
             text=text,
-            image=image,
         )
 
         # Generate query embedding
@@ -201,7 +195,7 @@ def embed_query(
             index_name=index_name,
             query_embedding=query_embedding,
             top_k=top_k,
-            filter_expr=filter_expr,
+            filter_expr=parsed_filter,
             return_metadata=return_metadata,
             return_distance=return_distance,
         )

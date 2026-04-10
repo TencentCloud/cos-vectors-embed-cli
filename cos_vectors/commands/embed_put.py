@@ -1,9 +1,8 @@
-"""Put subcommand for cos-vectors-embed-cli.
+"""Put subcommand for cos-vectors-embed.
 
 Vectorizes content and writes to COS Vector index.
 """
 
-import glob
 import json
 from typing import Any, Dict, Optional
 
@@ -12,12 +11,11 @@ from rich.console import Console
 from rich.json import JSON as RichJSON
 from rich.table import Table
 
-from cos_vectors.core.cos_vector_service import COSVectorService
-from cos_vectors.core.embedding_provider import get_provider
 from cos_vectors.core.streaming_batch_orchestrator import StreamingBatchOrchestrator
 from cos_vectors.core.unified_processor import UnifiedProcessor
-from cos_vectors.utils.config import get_domain, get_region
+from cos_vectors.utils.config import get_domain, get_region, init_services
 from cos_vectors.utils.models import prepare_processing_input
+from cos_vectors.utils.multimodal_helpers import is_cos_uri
 
 
 def _has_glob_pattern(path: str) -> bool:
@@ -25,12 +23,28 @@ def _has_glob_pattern(path: str) -> bool:
     return any(c in path for c in ("*", "?", "["))
 
 
-def _validate_inputs(text_value, text, image, video):
+def _is_cos_prefix(path: str) -> bool:
+    """Check if a COS URI is a prefix pattern (batch mode).
+
+    A COS URI is considered a prefix if it ends with '*' or '/'.
+    """
+    return is_cos_uri(path) and (path.endswith("*") or path.endswith("/"))
+
+
+def _needs_batch_mode(path: str) -> bool:
+    """Check if the input path requires batch (streaming) processing.
+
+    Batch mode is triggered by local glob patterns or COS prefix URIs.
+    """
+    return _has_glob_pattern(path) or _is_cos_prefix(path)
+
+
+def _validate_inputs(text_value, text, video):
     """Validate that at least one input source is provided."""
-    if not any([text_value, text, image, video]):
+    if not any([text_value, text, video]):
         raise click.UsageError(
             "At least one input is required: "
-            "--text-value, --text, --image, or --video"
+            "--text-value, --text, or --video"
         )
 
 
@@ -58,12 +72,7 @@ def _validate_inputs(text_value, text, image, video):
 @click.option(
     "--text",
     default=None,
-    help="Local text file path (supports glob patterns).",
-)
-@click.option(
-    "--image",
-    default=None,
-    help="Local image file path (supports glob patterns).",
+    help="Text file path, glob pattern, COS URI (cos://bucket/key), or COS prefix (cos://bucket/prefix/*).",
 )
 @click.option(
     "--video",
@@ -149,7 +158,6 @@ def embed_put(
     model_id,
     text_value,
     text,
-    image,
     video,
     key,
     key_prefix,
@@ -171,10 +179,10 @@ def embed_put(
 
     # Resolve region and domain (command-level overrides global)
     region = get_region(region or ctx.obj.get("region"))
-    domain = get_domain(domain or ctx.obj.get("domain"))
+    domain = get_domain(domain or ctx.obj.get("domain"), region=region)
 
     # Validate inputs
-    _validate_inputs(text_value, text, image, video)
+    _validate_inputs(text_value, text, video)
 
     # Parse metadata JSON
     user_metadata: Optional[Dict[str, Any]] = None
@@ -185,48 +193,33 @@ def embed_put(
             raise click.UsageError(f"Invalid --metadata JSON: {e}")
 
     # Parse extra inference params
-    extra_params: Optional[Dict[str, Any]] = None
+    # TODO: Pass extra_params to embedding provider when supported
+    _extra_params: Optional[Dict[str, Any]] = None
     if embedding_inference_params:
         try:
-            extra_params = json.loads(embedding_inference_params)
+            _extra_params = json.loads(embedding_inference_params)
         except json.JSONDecodeError as e:
             raise click.UsageError(
                 f"Invalid --embedding-inference-params JSON: {e}"
             )
 
-    # Validate embedding API config
-    if not embedding_api_base:
-        raise click.UsageError(
-            "Embedding API base URL is required. "
-            "Use --embedding-api-base or set EMBEDDING_API_BASE env var."
-        )
-    if not embedding_api_key:
-        raise click.UsageError(
-            "Embedding API key is required. "
-            "Use --embedding-api-key or set EMBEDDING_API_KEY env var."
-        )
-
     try:
         # Initialize services
-        embedding_provider = get_provider(
-            provider_type=provider,
-            api_base=embedding_api_base,
-            api_key=embedding_api_key,
-            default_model=model_id,
-            console=console,
-            debug=debug,
-        )
-
-        cos_service = COSVectorService(
+        embedding_provider, cos_service, cos_s3_client = init_services(
+            provider=provider,
+            embedding_api_base=embedding_api_base,
+            embedding_api_key=embedding_api_key,
+            model_id=model_id,
             region=region,
             domain=domain,
-            debug=debug,
+            text=text,
             console=console,
+            debug=debug,
         )
 
-        # Detect streaming batch mode (glob patterns)
-        file_pattern = text or image
-        if file_pattern and _has_glob_pattern(file_pattern):
+        # Detect streaming batch mode (glob patterns or COS prefix)
+        file_pattern = text
+        if file_pattern and _needs_batch_mode(file_pattern):
             # Streaming batch processing
             orchestrator = StreamingBatchOrchestrator(
                 embedding_provider=embedding_provider,
@@ -236,6 +229,7 @@ def embed_put(
                 batch_size=batch_size,
                 console=console,
                 debug=debug,
+                cos_s3_client=cos_s3_client,
             )
 
             batch_result = orchestrator.process_streaming_batch(
@@ -272,12 +266,12 @@ def embed_put(
                 model_id=model_id,
                 console=console,
                 debug=debug,
+                cos_s3_client=cos_s3_client,
             )
 
             processing_input = prepare_processing_input(
                 text_value=text_value,
                 text=text,
-                image=image,
                 video=video,
                 metadata=user_metadata,
                 custom_key=key,
