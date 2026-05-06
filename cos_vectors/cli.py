@@ -57,7 +57,11 @@ cli.add_command(embed_query, name="query")
 def main():
     """Main entry point with error handling."""
     try:
-        cli()
+        # Disable Click's default Windows glob expansion so that patterns
+        # like `--text "D:\tmp\text\*"` are forwarded as-is to our own
+        # batch processor. Otherwise Click would expand the wildcard into
+        # multiple file paths and break single-value options.
+        cli(windows_expand_args=False)
     except KeyboardInterrupt:
         console = Console()
         console.print("\n[yellow]Operation cancelled by user.[/yellow]")
