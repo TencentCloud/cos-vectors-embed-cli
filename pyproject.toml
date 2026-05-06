@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cos-vectors-embed-cli"
+dynamic = ["version"]
+description = "Standalone CLI for COS Vector operations with pluggable embeddings"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Tencent Cloud COS Team"}
+]
+keywords = ["tencent", "cos", "vectors", "embeddings", "cli", "machine-learning", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "cos-python-sdk-v5>=1.9.40",
+    "click>=8.0.0",
+    "rich>=12.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+cos-vectors-embed = "cos_vectors.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/TencentCloud/cos-vectors-embed-cli"
+Repository = "https://github.com/TencentCloud/cos-vectors-embed-cli"
+Issues = "https://github.com/TencentCloud/cos-vectors-embed-cli/issues"
+
+[tool.setuptools]
+packages = ["cos_vectors", "cos_vectors.commands", "cos_vectors.core", "cos_vectors.utils"]
+
+[tool.setuptools.dynamic]
+version = {attr = "cos_vectors.__version__.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

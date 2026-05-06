@@ -121,6 +121,8 @@ class TestEmbedPutCLI:
         "COS_DOMAIN": "vectors.test.com",
         "COS_SECRET_ID": "test-id",
         "COS_SECRET_KEY": "test-key",
+        "EMBEDDING_API_BASE": "",
+        "EMBEDDING_API_KEY": "",
     })
     def test_missing_api_base(self):
         runner = CliRunner()
