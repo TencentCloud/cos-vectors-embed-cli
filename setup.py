@@ -21,9 +21,15 @@ setup(
     name="cos-vectors-embed-cli",
     version=version["__version__"],
     author="Tencent Cloud COS Team",
+    license="Apache-2.0",
     description="Standalone CLI for COS Vector operations with pluggable embeddings",
     long_description=long_description,
     long_description_content_type="text/markdown",
+    project_urls={
+        "Homepage": "https://github.com/TencentCloud/cos-vectors-embed-cli",
+        "Repository": "https://github.com/TencentCloud/cos-vectors-embed-cli",
+        "Issues": "https://github.com/TencentCloud/cos-vectors-embed-cli/issues",
+    },
     python_requires=">=3.9",
     packages=find_packages(exclude=["tests*"]),
     install_requires=[
@@ -45,10 +51,16 @@ setup(
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
+        "License :: OSI Approved :: Apache Software License",
+        "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Topic :: Utilities",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+        "Environment :: Console",
     ],
 )

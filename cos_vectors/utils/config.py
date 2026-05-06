@@ -212,6 +212,7 @@ def init_services(
     from cos_vectors.core.embedding_provider import get_provider
     from cos_vectors.utils.multimodal_helpers import is_cos_uri
 
+    # Validate embedding config BEFORE any network calls
     if not embedding_api_base:
         raise click.UsageError(
             "Embedding API base URL is required. "
